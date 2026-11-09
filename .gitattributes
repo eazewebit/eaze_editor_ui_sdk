@@ -1,0 +1,52 @@
+# Normalize line endings: repository is canonical LF, independent of core.autocrlf.
+* text=auto eol=lf
+
+# Shell / scripting must stay LF to remain executable on POSIX hosts.
+*.sh text eol=lf
+*.bash text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never apply EOL conversion or diff/merge text heuristics to binary payloads.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.svg text eol=lf
+*.jar binary
+*.war binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.class binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.pdf binary
+*.keystore binary
+*.jks binary
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary
+
+# Language / documentation diff drivers.
+*.java text diff=java
+*.js text diff=js
+*.mjs text diff=js
+*.css text
+*.html text diff=html
+*.md text diff=markdown
+*.gradle text
+*.json text
+*.xml text
+*.properties text
+
+# Exclude export/generation artifacts from merge conflict resolution noise.
+*.min.js -diff
+*.min.css -diff
+package-lock.json merge=npm
