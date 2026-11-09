@@ -1,0 +1,9 @@
+/*
+ * Standalone build root.  Lets this repository be cloned and built on its own
+ * (`gradle clean build` from this directory) without the parent application.
+ *
+ * A parent build that does `include 'eaze_editor_ui_sdk'` is NOT affected: Gradle
+ * reads exactly one settings file — the one at its build root — and never descends
+ * into an included project directory looking for another.
+ */
+rootProject.name = 'eaze_editor_ui_sdk'

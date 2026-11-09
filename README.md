@@ -22,6 +22,9 @@ eaze_ui_sdk.js  ── local listeners/handlers ─┐   ┌ UiCommandBus ──
 
 ## Gradle
 
+This module is its own Gradle build root (`settings.gradle` → `rootProject.name = 'eaze_editor_ui_sdk'`).
+Requires JDK 25 (Gradle toolchain) and Gradle 9.x; no wrapper jar is committed.
+
 ```groovy
 // Host application (Spring Boot): auto-configuration does everything.
 implementation project(':eaze_editor_ui_sdk')
@@ -32,6 +35,13 @@ compileOnly project(':eaze_editor_ui_sdk')
 
 Java 25, Spring dependencies are `compileOnly`, so a plain JVM host can use the module without Spring at all
 (`new DefaultUiRuntime(provider)` + `EazeUiSdk.install(...)`).
+
+```powershell
+gradle clean build     # from this directory: builds only the SDK
+```
+
+A parent build that does `include 'eaze_editor_ui_sdk'` keeps working unchanged — Gradle resolves a single settings
+file, the one at its own build root, and never descends into an included project directory looking for another.
 
 ## Host wiring
 
