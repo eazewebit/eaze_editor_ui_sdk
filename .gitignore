@@ -1,0 +1,19 @@
+### Gradle build output ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+### Eaze Editor local metadata (never publish) ###
+.eazeditor/
+
+### IDE ###
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+out/
+
+### OS ###
+.DS_Store
+Thumbs.db

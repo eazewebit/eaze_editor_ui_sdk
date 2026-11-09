@@ -1,0 +1,292 @@
+/* ============================================================================
+   eaze_editor_ui_sdk.css
+   Container styling for the Eaze Editor UI SDK (toasts, dialogs, forms,
+   conversation).  Deliberately framework free: no Tailwind classes are used so
+   the SDK renders identically on any host page.  Colours follow the editor's
+   dark palette and can be re-themed by overriding the custom properties below.
+   ========================================================================== */
+
+.eaze-ui-overlay,
+.eaze-ui-toast-stack,
+.eaze-ui-dialog {
+    --eaze-ui-bg: #1f2937;
+    --eaze-ui-bg-raised: #111827;
+    --eaze-ui-border: #374151;
+    --eaze-ui-text: #f3f4f6;
+    --eaze-ui-text-muted: #9ca3af;
+    --eaze-ui-accent: #2563eb;
+    --eaze-ui-accent-hover: #1d4ed8;
+    --eaze-ui-danger: #dc2626;
+    --eaze-ui-success: #16a34a;
+    --eaze-ui-warning: #d97706;
+    --eaze-ui-info: #2563eb;
+    --eaze-ui-radius: 8px;
+    --eaze-ui-shadow: 0 18px 45px rgba(0, 0, 0, .55);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---------------------------------------------------------------- toasts -- */
+.eaze-ui-toast-stack {
+    position: fixed;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(360px, calc(100vw - 32px));
+    pointer-events: none;
+}
+
+.eaze-ui-toast-stack[data-eaze-ui-toast-position^="top"] { top: 16px; }
+.eaze-ui-toast-stack[data-eaze-ui-toast-position^="bottom"] { bottom: 16px; flex-direction: column-reverse; }
+.eaze-ui-toast-stack[data-eaze-ui-toast-position$="right"] { right: 16px; }
+.eaze-ui-toast-stack[data-eaze-ui-toast-position$="left"] { left: 16px; }
+.eaze-ui-toast-stack[data-eaze-ui-toast-position$="center"] { left: 50%; transform: translateX(-50%); }
+
+.eaze-ui-toast {
+    pointer-events: auto;
+    display: grid;
+    grid-template-columns: 20px 1fr 24px;
+    align-items: start;
+    gap: 10px;
+    padding: 10px 12px;
+    color: var(--eaze-ui-text);
+    background: var(--eaze-ui-bg);
+    border: 1px solid var(--eaze-ui-border);
+    border-left-width: 4px;
+    border-radius: var(--eaze-ui-radius);
+    box-shadow: var(--eaze-ui-shadow);
+    font-size: 13px;
+    line-height: 1.45;
+    animation: eaze-ui-toast-in .18s ease-out;
+}
+
+.eaze-ui-toast--leaving { opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s; }
+.eaze-ui-toast__icon { width: 20px; height: 20px; margin-top: 1px; }
+.eaze-ui-toast--success { border-left-color: var(--eaze-ui-success); }
+.eaze-ui-toast--success .eaze-ui-toast__icon { color: var(--eaze-ui-success); }
+.eaze-ui-toast--info { border-left-color: var(--eaze-ui-info); }
+.eaze-ui-toast--info .eaze-ui-toast__icon { color: var(--eaze-ui-info); }
+.eaze-ui-toast--warning { border-left-color: var(--eaze-ui-warning); }
+.eaze-ui-toast--warning .eaze-ui-toast__icon { color: var(--eaze-ui-warning); }
+.eaze-ui-toast--error { border-left-color: var(--eaze-ui-danger); }
+.eaze-ui-toast--error .eaze-ui-toast__icon { color: var(--eaze-ui-danger); }
+
+.eaze-ui-toast__title { font-weight: 600; margin-bottom: 2px; }
+.eaze-ui-toast__message { color: #d1d5db; word-break: break-word; white-space: pre-wrap; }
+
+.eaze-ui-toast__close {
+    background: transparent;
+    border: 0;
+    color: var(--eaze-ui-text-muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+.eaze-ui-toast__close:hover { color: var(--eaze-ui-text); }
+
+@keyframes eaze-ui-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* --------------------------------------------------------------- dialogs -- */
+.eaze-ui-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(3, 7, 18, .62);
+    backdrop-filter: blur(2px);
+    z-index: 2100;
+}
+
+.eaze-ui-overlay--leaving { opacity: 0; transition: opacity .14s ease-out; }
+
+.eaze-ui-dialog {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: min(86vh, 900px);
+    color: var(--eaze-ui-text);
+    background: var(--eaze-ui-bg);
+    border: 1px solid var(--eaze-ui-border);
+    border-radius: 10px;
+    box-shadow: var(--eaze-ui-shadow);
+    animation: eaze-ui-dialog-in .16s ease-out;
+}
+
+.eaze-ui-dialog--sm { max-width: 24rem; }
+.eaze-ui-dialog--md { max-width: 34rem; }
+.eaze-ui-dialog--lg { max-width: 46rem; }
+.eaze-ui-dialog--xl { max-width: 60rem; }
+
+@keyframes eaze-ui-dialog-in { from { opacity: 0; transform: translateY(10px) scale(.99); } to { opacity: 1; transform: none; } }
+
+.eaze-ui-dialog__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--eaze-ui-border);
+}
+
+.eaze-ui-dialog__title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+.eaze-ui-dialog__icon { font-size: 16px; }
+.eaze-ui-dialog__close { background: transparent; border: 0; color: var(--eaze-ui-text-muted); font-size: 22px; line-height: 1; cursor: pointer; }
+.eaze-ui-dialog__close:hover { color: var(--eaze-ui-text); }
+
+.eaze-ui-dialog__body { padding: 18px; overflow-y: auto; font-size: 14px; line-height: 1.55; }
+.eaze-ui-dialog__message { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.eaze-ui-dialog__html :is(p, ul, ol) { margin: 0 0 .6em; }
+
+.eaze-ui-dialog__footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--eaze-ui-border);
+}
+
+/* ------------------------------------------------------------- buttons --- */
+.eaze-ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 74px;
+    padding: 7px 14px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+
+.eaze-ui-btn--primary { background: var(--eaze-ui-accent); color: #fff; }
+.eaze-ui-btn--primary:hover { background: var(--eaze-ui-accent-hover); }
+.eaze-ui-btn--secondary { background: #374151; color: var(--eaze-ui-text); }
+.eaze-ui-btn--secondary:hover { background: #4b5563; }
+.eaze-ui-btn--ghost { background: transparent; color: #d1d5db; border-color: var(--eaze-ui-border); }
+.eaze-ui-btn--ghost:hover { background: rgba(255, 255, 255, .06); }
+.eaze-ui-btn--danger { background: var(--eaze-ui-danger); color: #fff; }
+.eaze-ui-btn--danger:hover { filter: brightness(.92); }
+.eaze-ui-btn[hidden] { display: none; }
+.eaze-ui-btn:disabled { opacity: .55; cursor: not-allowed; }
+.eaze-ui-btn:focus-visible,
+.eaze-ui-input:focus-visible,
+.eaze-ui-dialog__close:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
+
+/* --------------------------------------------------------------- fields -- */
+.eaze-ui-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.eaze-ui-field--hidden { display: none; }
+.eaze-ui-field__label { font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--eaze-ui-text-muted); }
+.eaze-ui-field__required { color: #f87171; }
+.eaze-ui-field__helper { font-size: 12px; color: var(--eaze-ui-text-muted); }
+.eaze-ui-field__error { display: none; font-size: 12px; color: #fca5a5; }
+.eaze-ui-field[data-invalid="true"] .eaze-ui-field__error { display: block; }
+
+.eaze-ui-input,
+.eaze-ui-textarea,
+.eaze-ui-select {
+    width: 100%;
+    padding: 8px 10px;
+    color: var(--eaze-ui-text);
+    background: var(--eaze-ui-bg-raised);
+    border: 1px solid var(--eaze-ui-border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.eaze-ui-textarea { resize: vertical; min-height: 72px; }
+.eaze-ui-input:focus, .eaze-ui-textarea:focus, .eaze-ui-select:focus { border-color: var(--eaze-ui-accent); outline: none; }
+.eaze-ui-field[data-invalid="true"] .eaze-ui-input { border-color: var(--eaze-ui-danger); }
+
+.eaze-ui-field__inline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--eaze-ui-text); cursor: pointer; }
+.eaze-ui-radio-group { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.eaze-ui-checkbox, .eaze-ui-radio { width: 15px; height: 15px; accent-color: var(--eaze-ui-accent); cursor: pointer; }
+
+.eaze-ui-file-row { display: flex; align-items: center; gap: 8px; }
+.eaze-ui-file-row .eaze-ui-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.eaze-ui-file-native { font-size: 12px; color: var(--eaze-ui-text-muted); }
+
+/* ----------------------------------------------------------------- form -- */
+.eaze-ui-form__description { margin-bottom: 14px; color: #d1d5db; font-size: 13px; }
+.eaze-ui-form__error,
+.eaze-ui-conversation__error {
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    color: #fecaca;
+    background: rgba(220, 38, 38, .16);
+    border: 1px solid rgba(248, 113, 113, .45);
+    border-radius: 6px;
+    font-size: 12.5px;
+}
+
+.eaze-ui-form__fields--grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
+
+/* -------------------------------------------------------- conversation -- */
+.eaze-ui-conversation__intro { margin-bottom: 14px; color: #d1d5db; font-size: 13.5px; }
+.eaze-ui-conversation__progress { margin-bottom: 12px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--eaze-ui-text-muted); }
+.eaze-ui-conversation__turns { display: flex; flex-direction: column; gap: 18px; }
+
+.eaze-ui-conversation__turn { display: flex; flex-direction: column; gap: 8px; padding-bottom: 4px; }
+.eaze-ui-conversation__turn[hidden] { display: none; }
+.eaze-ui-conversation__bubble-row { display: flex; justify-content: flex-start; }
+
+.eaze-ui-conversation__bubble {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 92%;
+    padding: 9px 12px;
+    color: var(--eaze-ui-text);
+    background: #111827;
+    border: 1px solid var(--eaze-ui-border);
+    border-radius: 12px 12px 12px 4px;
+}
+
+.eaze-ui-conversation__avatar { font-size: 15px; line-height: 1.3; }
+.eaze-ui-conversation__text { white-space: pre-wrap; word-break: break-word; }
+.eaze-ui-conversation__hint { font-size: 12px; color: var(--eaze-ui-text-muted); padding-left: 4px; }
+
+@media (max-width: 640px) {
+    .eaze-ui-overlay { padding: 12px; }
+    .eaze-ui-dialog--lg, .eaze-ui-dialog--xl { max-width: 100%; }
+}
+
+/* ------------------------------------------------ field contract hardening -- */
+
+/* Accessible-only caption: in the a11y tree, invisible on screen (conversation questions). */
+.eaze-ui-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* A dropped or clamped default / ignored spec key is shown to the human, not only logged. */
+.eaze-ui-field__warning {
+    font-size: 12px;
+    line-height: 1.45;
+    color: #b45309;
+    background: rgba(180, 83, 9, .10);
+    border-left: 3px solid rgba(180, 83, 9, .55);
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+
+.eaze-ui-field__hint { font-size: 11.5px; color: var(--eaze-ui-text-muted); }
+
+@media (prefers-color-scheme: dark) {
+    .eaze-ui-field__warning { color: #fbbf24; background: rgba(251, 191, 36, .10); }
+}

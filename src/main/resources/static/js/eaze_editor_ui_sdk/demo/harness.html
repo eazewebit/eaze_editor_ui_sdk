@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Eaze Editor UI SDK — standalone harness</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--
+        Standalone host page used to exercise the UI SDK outside of the full
+        Spring Boot application (CDP driven tests, plugin development).  Assets are
+        served from the eaze_editor_ui_sdk jar / module resources, so when the web
+        root is <module>/src/main/resources/static the absolute paths below resolve
+        exactly like they do inside /ai_code_editor.
+
+        Query flags:
+          ?sdkDemo=1    show the floating demo panel
+          ?mockJvm=1    install a fake JVM transport (no WebSocket, no Java needed):
+                        ui.selectNativePath / ui.nativeCapabilities are answered in-page
+          ?selftest=1   run eazeUiSdkHarness.runBridgeTest() automatically and print
+                        the JSON report into <pre id="out">
+        Without ?mockJvm the real STOMP bridge connects to /ws/eaze-ui-sdk, i.e. this
+        page behaves exactly like the editor when served by Spring Boot.
+    -->
+    <link rel="stylesheet" href="/css/eaze_editor_ui_sdk.css">
+
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_css.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_toast.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_dialog.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_spec.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_fields.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_form.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_conversation.js"></script>
+
+    <script>
+        /* The bridge reads its config at load time, so the mock switch must be set first. */
+        (function () {
+            var mocking = /[?&]mockJvm=1/.test(location.search);
+            window.eazeUiSdk.core.config.bridge = Object.assign({}, window.eazeUiSdk.core.config.bridge, {
+                enabled: !mocking,
+                autoConnect: !mocking
+            });
+        })();
+    </script>
+
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_bridge.js"></script>
+    <script src="/js/eaze_editor_ui_sdk/eaze_ui_sdk_native.js"></script>
+
+    <script>
+        /**
+         * Fake JVM side of the bridge.  Answers exactly like DefaultUiRuntime does —
+         * one envelope in, one correlated response out — so plugin code can be tested
+         * without booting Spring Boot or opening a native dialog.
+         */
+        (function () {
+            var sdk = window.eazeUiSdk;
+            if (!/[?&]mockJvm=1/.test(location.search)) return;
+
+            var calls = [];
+            var listeners = [];
+
+            function answer(request, ok, result, error) {
+                sdk.receive({
+                    id: request.id,
+                    type: 'eaze-ui-response',
+                    action: request.action,
+                    ok: ok !== false,
+                    result: result == null ? null : result,
+                    error: error || null
+                }, { remote: true });
+            }
+
+            sdk.addTransport(function (envelope) {
+                if (!envelope) return;
+                calls.push(envelope);
+                listeners.slice().forEach(function (fn) { try { fn(envelope); } catch (e) { /* ignore */ } });
+                if (envelope.type !== 'eaze-ui-request') return;
+
+                setTimeout(function () {
+                    var payload = envelope.payload || {};
+                    switch (envelope.action) {
+                        case 'ui.selectNativePath':
+                            var mode = payload.mode || 'file';
+                            var paths = mode === 'files' ? ['C:/mock/a.txt', 'C:/mock/b.txt']
+                                : mode === 'directory' ? ['C:/mock/folder'] : ['C:/mock/file.txt'];
+                            answer(envelope, true, { status: 'SELECTED', mode: mode, paths: paths, path: paths[0] });
+                            break;
+                        case 'ui.nativeCapabilities':
+                            answer(envelope, true, {
+                                version: '1.0.0-mock', nativePathSelection: true,
+                                browserConnected: true, transports: ['mock'], jvmActions: []
+                            });
+                            break;
+                        default:
+                            answer(envelope, false, null, { code: 'NO_HANDLER', message: 'mock JVM has no handler for ' + envelope.action });
+                    }
+                }, 5);
+            });
+
+            window.__sdkJvmMock = {
+                calls: calls,
+                onCall: function (fn) { listeners.push(fn); return function () { listeners.splice(listeners.indexOf(fn), 1); }; },
+                /** Let a test push an inbound envelope as if Java had sent it. */
+                push: function (envelope) { sdk.receive(envelope, { remote: true }); },
+                /** Ask the browser to do something, exactly like a Java plugin would. */
+                ask: function (action, payload) {
+                    var id = 'jvm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+                    return new Promise(function (resolve) {
+                        var off = window.__sdkJvmMock.onCall(function (env) {
+                            if (env.type === 'eaze-ui-response' && env.id === id) { off(); resolve(env); }
+                        });
+                        sdk.receive({
+                            id: id, type: 'eaze-ui-request', action: action,
+                            sourcePluginId: 'mock-jvm', payload: payload || {}
+                        }, { remote: true });
+                    });
+                }
+            };
+        })();
+    </script>
+
+    <script src="/js/eaze_editor_ui_sdk/demo/eaze_ui_sdk_demo_plugin.js"></script>
+
+    <style>
+        body { background: #111827; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 24px; }
+        .harness { max-width: 52rem; }
+        .harness h1 { font-size: 1.15rem; }
+        .harness code, .harness pre { background: #0b1220; border: 1px solid #1f2937; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+        .harness pre { padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+<div class="harness">
+    <h1>Eaze Editor UI SDK — standalone harness</h1>
+    <p>
+        This page loads the SDK exactly like <code>/ai_code_editor</code> does.
+        Demo panel: <code>eazeUiSdkDemo.show()</code> · widget suite: <code>await eazeUiSdkDemo.runSelfTest()</code> ·
+        bridge/JVM routing: <code>await eazeUiSdkHarness.runBridgeTest()</code> (needs <code>?mockJvm=1</code>).
+    </p>
+    <pre id="out">loading…</pre>
+</div>
+
+<script>
+    /**
+     * Bridge routing tests — they assert the request/relay rules of the SDK core:
+     * local handlers win, unknown actions travel to the JVM, replies are correlated
+     * by id, and a foreign/stale reply can never resolve somebody else's request.
+     */
+    (function () {
+        var sdk = window.eazeUiSdk;
+
+        function step(name, fn) {
+            return Promise.resolve().then(fn).then(function (detail) {
+                return { name: name, ok: true, detail: detail == null ? '' : String(detail) };
+            }).catch(function (err) {
+                return { name: name, ok: false, detail: (err && err.code ? err.code + ': ' : '') + (err && err.message ? err.message : err) };
+            });
+        }
+
+        function tick(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+        function runBridgeTest() {
+            if (!window.__sdkJvmMock) {
+                return Promise.reject(new Error('run the harness with ?mockJvm=1 to test the bridge'));
+            }
+            var mock = window.__sdkJvmMock;
+            var results = [];
+            var record = function (r) { results.push(r); return r; };
+
+            return step('relay-to-jvm', function () {
+                return sdk.request('ui.selectNativePath', { title: 'x', mode: 'directory', notifyWhileWaiting: false })
+                    .then(function (res) { if (!res.path) throw new Error('no path'); return res.path; });
+            }).then(record)
+                .then(function () {
+                    return step('local-handler-wins', function () {
+                        var before = mock.calls.length;
+                        sdk.registerListener('demo.jvmProbe', function (payload) { return { local: true, saw: payload }; });
+                        return sdk.request('demo.jvmProbe', { n: 1 }).then(function (res) {
+                            if (!res.local) throw new Error('not handled locally');
+                            if (mock.calls.length !== before) throw new Error('leaked to the bridge despite a local handler');
+                            return 'no leak';
+                        });
+                    }).then(record);
+                })
+                .then(function () {
+                    return step('unknown-action-errors', function () {
+                        return sdk.request('demo.nobody.handles.this', {}).then(
+                            function () { throw new Error('expected NO_HANDLER'); },
+                            function (err) { if (err.code !== 'NO_HANDLER') throw err; return err.code; });
+                    }).then(record);
+                })
+                .then(function () {
+                    return step('jvm-request-to-browser', function () {
+                        var off = sdk.registerListener('demo.fromJava', function (payload) { return { got: payload.value }; });
+                        return mock.ask('demo.fromJava', { value: 7 }).then(function (envelope) {
+                            off();
+                            if (!envelope.ok) throw new Error('browser refused the JVM request');
+                            if (envelope.result.got !== 7) throw new Error('wrong result: ' + JSON.stringify(envelope.result));
+                            return JSON.stringify(envelope.result);
+                        });
+                    }).then(record);
+                })
+                .then(function () {
+                    return step('local-request-ignores-remote-noise', function () {
+                        sdk.registerListener('demo.slow.local', function () {
+                            return new Promise(function (r) { setTimeout(function () { r('late'); }, 40); });
+                        });
+                        var pending = sdk.request('demo.slow.local', {});
+                        // A reply for an id nobody asked about must be dropped silently.
+                        sdk.receive({ id: 'req-unknown', type: 'eaze-ui-response', ok: true, result: 'stolen' }, { remote: true });
+                        return pending.then(function (value) {
+                            if (value !== 'late') throw new Error('unexpected value: ' + value);
+                            return value;
+                        });
+                    }).then(record);
+                })
+                .then(function () {
+                    var failed = results.filter(function (r) { return !r.ok; }).length;
+                    return {
+                        total: results.length,
+                        failed: failed,
+                        summary: (results.length - failed) + '/' + results.length + ' passed',
+                        results: results
+                    };
+                });
+        }
+
+        window.eazeUiSdkHarness = { runBridgeTest: runBridgeTest };
+
+        var out = document.getElementById('out');
+        sdk.ready.then(function () {
+            out.textContent = 'SDK v' + sdk.version + ' ready. Features: ' +
+                Object.keys(sdk).filter(function (k) { return typeof sdk[k] === 'function'; }).sort().join(', ');
+
+            if (!/[?&]selftest=1/.test(location.search)) return;
+            tick(50).then(runBridgeTest).then(function (report) {
+                out.textContent = 'bridge self test: ' + report.summary + '\n' +
+                    report.results.map(function (r) { return (r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.detail ? ' — ' + r.detail : ''); }).join('\n');
+            });
+        });
+    })();
+</script>
+</body>
+</html>

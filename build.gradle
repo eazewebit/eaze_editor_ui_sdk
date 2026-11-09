@@ -1,0 +1,43 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'com.eazeeditor'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://repo.spring.io/milestone' }
+}
+
+dependencies {
+    // ------------------------------------------------------------------
+    // Spring is OPTIONAL at runtime.  The core of this module (bus, plugin
+    // scopes, contracts) is plain Java and works in any host application.
+    // Only com.eazeeditor.core.uisdk.spring.* needs Spring, and those
+    // classes are only loaded when the host actually ships it (they are
+    // registered through Spring Boot auto-configuration).  compileOnly keeps
+    // this jar usable by non-Spring hosts and prevents version drift: the
+    // host (webui) contributes the real Spring jars at runtime.
+    // ------------------------------------------------------------------
+    compileOnly 'org.springframework:spring-context:6.2.8'
+    compileOnly 'org.springframework:spring-messaging:6.2.8'
+    compileOnly 'org.springframework:spring-web:6.2.8'
+    compileOnly 'org.springframework:spring-websocket:6.2.8'
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure:3.5.3'
+    compileOnly 'org.slf4j:slf4j-api:2.0.17'
+
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
