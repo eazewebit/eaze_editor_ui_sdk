@@ -66,10 +66,15 @@ Errors carry stable codes: `CANCELLED`, `TIMEOUT`, `NO_HANDLER`, `INVALID_PAYLOA
 `LISTENER_ERROR`, `BRIDGE_UNAVAILABLE`, `UNSAFE_REQUEST`. A dismissal is always `CANCELLED`; a failure to
 display never uses that code, so callers can tell "the user closed it" from "nothing showed up".
 
+**A dialogue never times out on its own.** `request()` carries no deadline unless the caller passes one (`{ timeoutMs: 30000 }`),
+and neither do `showDialog` / `showForm` / `askConversation` / `selectNativePath`: the modal stays open and the promise stays
+pending for as long as the human needs it. Opt in per call with a positive `timeoutMs`, or set a host-wide default through
+`eazeUiSdk.core.config.requestTimeoutMs` before the SDK files load, when a caller genuinely cannot wait.
+
 ## Field contract (`eaze_ui_sdk_spec.js`)
 
 Every field and every conversation question is normalised **before** a DOM node exists — identical rules in
-Node and browser, covered by `src/test/js/eaze_ui_sdk_spec.test.mjs` (21 checks).
+Node and browser, covered by `src/test/js/eaze_ui_sdk_spec.test.mjs` (23 checks).
 
 | Rule | Behaviour |
 | --- | --- |
@@ -105,8 +110,13 @@ Application-level messaging over the host's STOMP broker — one long-lived Sock
 | JVM → every window | subscribe `/topic/eaze-ui-sdk/events` (broadcast pushes) |
 | endpoint | SockJS `/ws/eaze-ui-sdk`, registered by the module itself (`UiSdkWebSocketConfigurer`) |
 
-Each browser tab keeps one `clientId` in `sessionStorage`, so reconnects keep routing intact. Reconnect uses
-a bounded backoff (`reconnectDelayMs: 3000`, `maxReconnectAttempts: 8`). Configure before the file loads:
+Each browser tab keeps one `clientId` in `sessionStorage`, so reconnects keep routing intact. Reconnect retries indefinitely by default (`reconnectDelayMs: 3000`, growing to `maxReconnectDelayMs: 20000`; `maxReconnectAttempts: -1` never gives up, `0` never retries) — the editor outlives backend restarts.
+
+On the JVM side that socket **is** the window: the SUBSCRIBE above binds it, and when a socket disconnects every request still waiting on that
+window is answered with `BRIDGE_UNAVAILABLE` — an unanswered dialogue can no longer park a plugin thread forever. A reconnect re-binds under the same
+`clientId`, so a socket lost during a network blip leaves an open question answerable instead of releasing it early.
+
+Configure before the file loads:
 
 ```js
 eazeUiSdk.core.config.bridge = { enabled: false };   // never touch the network (tests, offline pages)

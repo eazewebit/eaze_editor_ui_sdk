@@ -48,9 +48,25 @@ public interface UiRuntime {
    void touchClient(String clientId);
 
    /**
+    * A browser window went away: forget it and fail every pending request addressed to it with
+    * {@link com.eazeeditor.core.uisdk.api.UiError#BRIDGE_UNAVAILABLE} so threads blocked on an unanswered
+    * dialogue resume instead of waiting forever — dialogues carry no deadline by default, therefore the
+    * transport has to report a lost window itself.  The STOMP layer calls this when a socket disconnects.
+    *
+    * <p>Runtimes that do not track windows keep the inherited no-op; such a request then stays pending.
+    *
+    * @return how many pending requests were released (0 when nothing was outstanding for this client)
+    */
+   default int releaseBrowserClient(String clientId) {
+      return 0;
+   }
+
+   /**
     * Send a request to the browser UI and complete when the matching response
-    * arrives (correlated by id).  Completes exceptionally with
-    * {@link com.eazeeditor.core.uisdk.api.UiSdkException} on timeout / no channel.
+    * arrives (correlated by id).  A request carries <em>no</em> deadline unless it was built with
+    * {@link com.eazeeditor.core.uisdk.api.UiRequest#withTimeout(long)} — an unanswered dialogue simply
+    * stays pending for as long as the human needs it.  Completes exceptionally with
+    * {@link com.eazeeditor.core.uisdk.api.UiSdkException} on an expired deadline / no channel.
     */
    CompletableFuture<UiResponse> sendToBrowser(UiRequest request);
 

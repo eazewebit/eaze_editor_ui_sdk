@@ -30,9 +30,13 @@ import java.util.concurrent.TimeUnit;
  * a single HTTP endpoint.
  *
  * <p>Threads: one cached pool dispatches inbound browser traffic (a handler may
- * block on a modal dialog without stalling the host's message broker), one
- * single-shot scheduler enforces per-request timeouts.  Both are daemon pools so
- * they never keep the JVM alive.
+ * block on a modal dialog without stalling the host's message broker) and one scheduler serves only the
+ * deadlines a caller explicitly opted into.  Both are daemon pools so they never keep the JVM alive.
+ *
+ * <p>Because dialogue requests carry no deadline by default, a window that disappears has to report it:
+ * {@link #releaseBrowserClient(String)} fails everything addressed to it with
+ * {@link UiError#BRIDGE_UNAVAILABLE} (the STOMP layer calls it when the socket drops) so blocked plugin
+ * threads resume instead of waiting forever.
  */
 public final class DefaultUiRuntime implements UiRuntime {
 
@@ -42,8 +46,16 @@ public final class DefaultUiRuntime implements UiRuntime {
    public static final String ACTION_SELECT_NATIVE_PATH = "ui.selectNativePath";
    public static final String ACTION_CAPABILITIES = "ui.nativeCapabilities";
 
-   /** Browser round-trips may wait on a modal dialog; 15 minutes is the default ceiling. */
-   public static final long DEFAULT_BROWSER_TIMEOUT_MS = 15L * 60L * 1000L;
+   /**
+    * Requests carry <em>no</em> deadline unless the caller opted into one with
+    * {@link UiRequest#withTimeout(long)}.  A dialogue may stay open for as long as the human
+    * needs it, so an unanswered request simply stays pending until a window answers.
+    */
+   public static final long NO_TIMEOUT_MS = 0L;
+
+   /** @deprecated There is no implicit browser timeout any more — use {@link #NO_TIMEOUT_MS}. */
+   @Deprecated
+   public static final long DEFAULT_BROWSER_TIMEOUT_MS = NO_TIMEOUT_MS;
 
    private final UiCommandBus bus = new UiCommandBus();
    private final CopyOnWriteArrayList<UiBrowserTransport> transports = new CopyOnWriteArrayList<>();
@@ -168,6 +180,45 @@ public final class DefaultUiRuntime implements UiRuntime {
       }
    }
 
+   /**
+    * Forget a browser window that went away and fail every pending request addressed to it with
+    * {@link UiError#BRIDGE_UNAVAILABLE}.
+    *
+    * <p>A dialogue carries no deadline by default, so the transport has to report a lost window itself:
+    * without this a plugin thread blocked in {@code UiPluginScope.awaitResult} would wait forever the moment
+    * the editor closes without answering.  Requests aimed at another window stay untouched and a reconnecting
+    * window registers again through its next envelope.
+    *
+    * @return how many pending requests were released (0 when this client had nothing outstanding)
+    */
+   @Override
+   public int releaseBrowserClient(String clientId) {
+      String value = clientId == null ? null : clientId.trim();
+      if (value == null || value.isEmpty()) {
+         return 0;
+      }
+
+      synchronized (knownClients) {
+         knownClients.remove(value);
+      }
+
+      int released = 0;
+      for (Map.Entry<String, PendingEntry> candidate : pending.entrySet()) {
+         if (!value.equals(candidate.getValue().clientId())) {
+            continue;
+         }
+
+         if (pending.remove(candidate.getKey(), candidate.getValue())) {
+            candidate.getValue().cancelTimer();
+            candidate.getValue().future().completeExceptionally(new UiSdkException(UiError.BRIDGE_UNAVAILABLE,
+               "The editor window '" + value + "' disconnected before answering."));
+            released++;
+         }
+      }
+
+      return released;
+   }
+
    @Override
    public CompletableFuture<UiResponse> sendToBrowser(UiRequest request) {
       CompletableFuture<UiResponse> future = new CompletableFuture<>();
@@ -195,13 +246,16 @@ public final class DefaultUiRuntime implements UiRuntime {
          return future;
       }
 
-      long timeoutMs = request.getTimeoutMs() > 0 ? request.getTimeoutMs() : DEFAULT_BROWSER_TIMEOUT_MS;
-      ScheduledFuture<?> timer = timeouts.schedule(() -> expire(request.getId(), timeoutMs),
-         timeoutMs, TimeUnit.MILLISECONDS);
+      // No deadline unless the caller opted into one: a dialogue waits as long as the human needs it.
+      long timeoutMs = request.getTimeoutMs();
+      ScheduledFuture<?> timer = timeoutMs > 0L
+         ? timeouts.schedule(() -> expire(request.getId(), timeoutMs), timeoutMs, TimeUnit.MILLISECONDS)
+         : null;
 
-      PendingEntry previous = pending.putIfAbsent(request.getId(), new PendingEntry(future, timer));
+      PendingEntry entry = new PendingEntry(future, timer, clientId);
+      PendingEntry previous = pending.putIfAbsent(request.getId(), entry);
       if (previous != null) {
-         timer.cancel(false);
+         entry.cancelTimer();
          future.completeExceptionally(new UiSdkException(UiError.INVALID_PAYLOAD,
             "Duplicate request id '" + request.getId() + "'."));
          return future;
@@ -209,10 +263,10 @@ public final class DefaultUiRuntime implements UiRuntime {
 
       try {
          if (!transport.send(clientId, request.toMap())) {
-            expire(request.getId(), timeoutMs);
+            completeExceptionally(request.getId(), UiError.BRIDGE_UNAVAILABLE,
+               "The browser transport could not deliver the request.");
          }
       } catch (RuntimeException e) {
-         expire(request.getId(), 0L);
          completeExceptionally(request.getId(), UiError.BRIDGE_UNAVAILABLE, String.valueOf(e.getMessage()));
       }
 
@@ -330,7 +384,10 @@ public final class DefaultUiRuntime implements UiRuntime {
       shutdown = true;
       for (PendingEntry entry : pending.values()) {
          entry.cancelTimer();
-         entry.future().completeExceptionally(new UiSdkException(UiError.TIMEOUT, "UI SDK runtime shut down."));
+         // Not a deadline expiring: the channel itself is going away. TIMEOUT would tell a plugin that the
+         // human was too slow, which is exactly what this SDK no longer ever claims without an opt-in.
+         entry.future().completeExceptionally(new UiSdkException(UiError.BRIDGE_UNAVAILABLE,
+            "The UI SDK runtime is shut down."));
       }
       pending.clear();
       timeouts.shutdownNow();
@@ -389,7 +446,7 @@ public final class DefaultUiRuntime implements UiRuntime {
       }
    }
 
-   private record PendingEntry(CompletableFuture<UiResponse> future, ScheduledFuture<?> timer) {
+   private record PendingEntry(CompletableFuture<UiResponse> future, ScheduledFuture<?> timer, String clientId) {
       void cancelTimer() {
          if (timer != null) {
             timer.cancel(false);

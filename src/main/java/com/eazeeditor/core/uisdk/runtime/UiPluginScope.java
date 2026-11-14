@@ -34,8 +34,15 @@ import java.util.concurrent.TimeUnit;
  */
 public final class UiPluginScope {
 
-   /** Dialogs may legitimately wait for a human; 15 minutes before we give up. */
-   public static final long DEFAULT_UI_TIMEOUT_MS = 15L * 60L * 1000L;
+   /**
+    * Dialogues carry <em>no</em> deadline by default — a human may take as long as they need to
+    * answer.  Callers opt into one explicitly through the overloads that accept {@code timeoutMs}.
+    */
+   public static final long NO_TIMEOUT_MS = 0L;
+
+   /** @deprecated There is no implicit UI timeout any more — use {@link #NO_TIMEOUT_MS}. */
+   @Deprecated
+   public static final long DEFAULT_UI_TIMEOUT_MS = NO_TIMEOUT_MS;
 
    private final UiRuntime runtime;
    private final String pluginId;
@@ -89,20 +96,32 @@ public final class UiPluginScope {
    // Two-way calls into the browser UI
    // ------------------------------------------------------------------ //
 
+   /**
+    * Two-way call into the editor UI with <b>no deadline</b>: the future stays pending until a
+    * window answers, because a dialogue must never close behind the user's back.  Use the
+    * {@code timeoutMs} overload when the caller really wants a deadline.
+    */
    public CompletableFuture<UiResponse> askBrowser(String action, Map<String, Object> payload) {
-      return askBrowser(action, payload, DEFAULT_UI_TIMEOUT_MS);
+      return askBrowser(action, payload, NO_TIMEOUT_MS);
    }
 
    public CompletableFuture<UiResponse> askBrowser(String action, Map<String, Object> payload, long timeoutMs) {
       UiRequest request = UiRequest.jvm(action, payload == null ? new LinkedHashMap<>() : payload, pluginId)
-         .withTimeout(timeoutMs > 0 ? timeoutMs : DEFAULT_UI_TIMEOUT_MS);
+         .withTimeout(timeoutMs > 0 ? timeoutMs : NO_TIMEOUT_MS);
       return runtime.sendToBrowser(request);
    }
 
-   /** Blocking call; throws {@link UiSdkException} when the UI rejects or times out. */
+   /**
+    * Blocking call; throws {@link UiSdkException} when the UI rejects the request or — only when a
+    * positive {@code timeoutMs} was asked for — when it fails to answer in time.  With
+    * {@code timeoutMs <= 0} this waits for as long as the dialogue stays open: a human is never
+    * timed out unless the caller opted into a deadline.
+    */
    public Object awaitResult(String action, Map<String, Object> payload, long timeoutMs) {
       try {
-         UiResponse response = askBrowser(action, payload, timeoutMs).get(timeoutMs + 5_000L, TimeUnit.MILLISECONDS);
+         UiResponse response = timeoutMs > 0L
+            ? askBrowser(action, payload, timeoutMs).get(timeoutMs + 5_000L, TimeUnit.MILLISECONDS)
+            : askBrowser(action, payload, NO_TIMEOUT_MS).get();
          return response.unwrap();
       } catch (InterruptedException e) {
          Thread.currentThread().interrupt();
@@ -134,6 +153,7 @@ public final class UiPluginScope {
       payload.put("type", type == null ? "info" : type);
       payload.put("title", title);
       payload.put("message", message);
+      // A push, not a dialogue: the short deadline stops an unanswered toast from holding a pending id forever.
       askBrowser("ui.showToast", payload, 10_000L);
    }
 
@@ -162,7 +182,7 @@ public final class UiPluginScope {
       Map<String, Object> payload = new LinkedHashMap<>();
       payload.put("title", title == null ? "Notice" : title);
       payload.put("message", message == null ? "" : message);
-      awaitResult("ui.showDialog", payload, DEFAULT_UI_TIMEOUT_MS);
+      awaitResult("ui.showDialog", payload, NO_TIMEOUT_MS);
    }
 
    /** Yes/No prompt. {@code false} on Cancel/Esc instead of throwing. */
@@ -173,7 +193,7 @@ public final class UiPluginScope {
       payload.put("cancelBehavior", "resolve");
 
       try {
-         Map<String, Object> result = awaitMap("ui.showDialog", payload, DEFAULT_UI_TIMEOUT_MS);
+         Map<String, Object> result = awaitMap("ui.showDialog", payload, NO_TIMEOUT_MS);
          if (Boolean.TRUE.equals(result.get("cancelled"))) {
             return false;
          }
@@ -189,7 +209,7 @@ public final class UiPluginScope {
 
    /** Full-control dialog; see the module README for the option map. */
    public Map<String, Object> showDialog(Map<String, Object> options) {
-      return awaitMap("ui.showDialog", options, DEFAULT_UI_TIMEOUT_MS);
+      return awaitMap("ui.showDialog", options, NO_TIMEOUT_MS);
    }
 
    /** Native-input form. Keys of {@code fields} follow the JS field contract. */
@@ -197,7 +217,7 @@ public final class UiPluginScope {
       Map<String, Object> payload = new LinkedHashMap<>();
       payload.put("title", title == null ? "Input required" : title);
       payload.put("fields", fields == null ? Collections.emptyList() : fields);
-      return awaitMap("ui.showForm", payload, DEFAULT_UI_TIMEOUT_MS);
+      return awaitMap("ui.showForm", payload, NO_TIMEOUT_MS);
    }
 
    /** Conversation-style answer set (chat bubbles in one dialog). */
@@ -215,7 +235,7 @@ public final class UiPluginScope {
       payload.put("title", title == null ? "A few questions" : title);
       payload.put("questions", questions);
       payload.put("stepByStep", stepByStep);
-      return awaitMap("ui.askConversation", payload, DEFAULT_UI_TIMEOUT_MS);
+      return awaitMap("ui.askConversation", payload, NO_TIMEOUT_MS);
    }
 
    // ------------------------------------------------------------------ //

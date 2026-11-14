@@ -27,7 +27,7 @@
     var CODE = core.errorCodes;
 
     var MODES = ['file', 'directory', 'files'];
-    var DEFAULT_TIMEOUT_MS = 600000;      // a native dialog may legitimately stay open for many minutes
+    var NO_TIMEOUT_MS = 0;              // a native picker may stay open for hours — no deadline unless the caller asks for one
 
     function normalizeExtensions(value) {
         if (!value) return [];
@@ -85,7 +85,7 @@
             multiple: mode === 'files' || options.multiple === true,
             extensions: normalizeExtensions(options.extensions),
             initialPath: options.initialPath == null ? null : String(options.initialPath),
-            timeoutMs: typeof options.timeoutMs === 'number' ? options.timeoutMs : DEFAULT_TIMEOUT_MS,
+            timeoutMs: typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : NO_TIMEOUT_MS,
             sourcePluginId: (ctx && ctx.sourcePluginId) || 'host',
             notifyWhileWaiting: options.notifyWhileWaiting !== false
         };

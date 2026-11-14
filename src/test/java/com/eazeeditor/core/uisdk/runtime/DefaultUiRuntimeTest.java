@@ -21,6 +21,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -218,6 +222,124 @@ class DefaultUiRuntimeTest {
 
       ui.release();
       assertFalse(runtime.bus().hasHandler("myPlugin.ping"));
+   }
+
+   @Test
+   @DisplayName("a dialogue request without an explicit deadline never expires on its own")
+   void noImplicitTimeoutOnDialogues() throws Exception {
+      DefaultUiRuntime runtime = new DefaultUiRuntime();
+      FakeTransport transport = new FakeTransport();
+      runtime.registerBrowserClient("win-1");
+      runtime.registerTransport(transport);
+
+      CompletableFuture<UiResponse> future =
+         runtime.sendToBrowser(request("ui.showForm", Map.of("title", "Take your time")));
+
+      Map<String, Object> envelope = transport.sent.get(0);
+      assertFalse(envelope.containsKey("timeoutMs"), "no deadline may travel on the wire");
+      assertEquals(1, ((Number) runtime.capabilities().get("pendingRequests")).intValue());
+
+      Thread.sleep(250L);
+      assertFalse(future.isDone(), "an unanswered dialogue request must stay pending");
+      assertEquals(1, ((Number) runtime.capabilities().get("pendingRequests")).intValue());
+
+      assertTrue(runtime.completePending(UiResponse.ok(
+         (String) envelope.get("id"), "ui.showForm", Map.of("artifactId", "demo"))));
+      assertTrue(future.get(2, TimeUnit.SECONDS).isOk());
+   }
+
+   @Test
+   @DisplayName("a window that disconnects releases its pending dialogue with BRIDGE_UNAVAILABLE")
+   void disconnectReleasesOnlyItsOwnPendingRequests() throws Exception {
+      DefaultUiRuntime runtime = new DefaultUiRuntime();
+      FakeTransport transport = new FakeTransport();
+      runtime.registerBrowserClient("win-1");
+      runtime.registerBrowserClient("win-2");
+      runtime.registerTransport(transport);
+
+      CompletableFuture<UiResponse> closingWindow = runtime.sendToBrowser(
+         UiRequest.jvm("ui.showForm", Map.of("title", "Gone"), "test-plugin").withClientId("win-1"));
+      CompletableFuture<UiResponse> otherWindow = runtime.sendToBrowser(
+         UiRequest.jvm("ui.showForm", Map.of("title", "Still open"), "test-plugin").withClientId("win-2"));
+
+      assertEquals(2, ((Number) runtime.capabilities().get("pendingRequests")).intValue());
+      assertEquals(1, runtime.releaseBrowserClient("win-1"));
+
+      ExecutionException execution = assertThrows(ExecutionException.class,
+         () -> closingWindow.get(2, TimeUnit.SECONDS));
+      UiSdkException failure = assertInstanceOf(UiSdkException.class, execution.getCause());
+      assertEquals(UiError.BRIDGE_UNAVAILABLE, failure.getCode());
+
+      assertFalse(otherWindow.isDone(), "another window's dialogue must keep waiting");
+      assertEquals(1, ((Number) runtime.capabilities().get("pendingRequests")).intValue());
+
+      List<?> clients = (List<?>) runtime.capabilities().get("browserClients");
+      assertFalse(clients.contains("win-1"), "the lost window must stop receiving requests");
+      assertTrue(clients.contains("win-2"));
+
+      String survivingId = (String) transport.sent.get(1).get("id");
+      assertTrue(runtime.completePending(UiResponse.ok(survivingId, "ui.showForm", Map.of("artifactId", "demo"))));
+      assertTrue(otherWindow.get(2, TimeUnit.SECONDS).isOk());
+
+      assertEquals(0, runtime.releaseBrowserClient("win-1"), "releasing an already gone window is a no-op");
+      assertEquals(0, runtime.releaseBrowserClient(null));
+      assertEquals(0, runtime.releaseBrowserClient("   "));
+   }
+
+   @Test
+   @DisplayName("a blocking plugin call resumes when its window disappears instead of waiting forever")
+   void blockingCallUnblocksWhenTheWindowDisconnects() throws Exception {
+      DefaultUiRuntime runtime = new DefaultUiRuntime();
+      EazeUiSdk.install(runtime);
+      FakeTransport transport = new FakeTransport();
+      runtime.registerBrowserClient("win-1");
+      runtime.registerTransport(transport);
+
+      UiPluginScope ui = EazeUiSdk.forPlugin("my-plugin");
+      ExecutorService worker = Executors.newSingleThreadExecutor();
+      try {
+         Future<Object> blocking = worker.submit(() -> ui.awaitResult("ui.showForm", Map.of("title", "Take your time"), 0L));
+
+         long deadline = System.currentTimeMillis() + 2_000L;
+         while (transport.sent.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10L);
+         }
+         assertFalse(transport.sent.isEmpty(), "the request should have reached the window");
+
+         assertEquals(1, runtime.releaseBrowserClient("win-1"));
+
+         ExecutionException execution = assertThrows(ExecutionException.class,
+            () -> blocking.get(3, TimeUnit.SECONDS));
+         UiSdkException failure = assertInstanceOf(UiSdkException.class, execution.getCause());
+         assertEquals(UiError.BRIDGE_UNAVAILABLE, failure.getCode());
+      } finally {
+         worker.shutdownNow();
+      }
+   }
+
+   @Test
+   @DisplayName("a runtime shutdown releases pending requests with BRIDGE_UNAVAILABLE, never a fake TIMEOUT")
+   void shutdownReleasesPendingRequestsWithoutPretendingTimeout() throws Exception {
+      DefaultUiRuntime runtime = new DefaultUiRuntime();
+      FakeTransport transport = new FakeTransport();
+      runtime.registerBrowserClient("win-1");
+      runtime.registerTransport(transport);
+
+      CompletableFuture<UiResponse> dialogue =
+         runtime.sendToBrowser(request("ui.showForm", Map.of("title", "Still open")));
+      assertEquals(1, ((Number) runtime.capabilities().get("pendingRequests")).intValue());
+
+      runtime.shutdown();
+
+      ExecutionException execution = assertThrows(ExecutionException.class, () -> dialogue.get(2, TimeUnit.SECONDS));
+      UiSdkException failure = assertInstanceOf(UiSdkException.class, execution.getCause());
+      assertEquals(UiError.BRIDGE_UNAVAILABLE, failure.getCode(), "a shutdown is not a deadline expiring");
+      assertEquals(0, ((Number) runtime.capabilities().get("pendingRequests")).intValue());
+
+      ExecutionException afterShutdown = assertThrows(ExecutionException.class,
+         () -> runtime.sendToBrowser(request("ui.showToast", Map.of())).get(2, TimeUnit.SECONDS));
+      assertEquals(UiError.BRIDGE_UNAVAILABLE,
+         assertInstanceOf(UiSdkException.class, afterShutdown.getCause()).getCode());
    }
 
    private static final class AtomicIntegerHolder {

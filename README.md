@@ -10,7 +10,7 @@ eaze_ui_sdk.js  ── local listeners/handlers ─┐   ┌ UiCommandBus ──
               │                              │   │      ▲
               │ request(action, payload)     │   │      │ EazeUiSdk.forPlugin("x").onAction(...)
               ▼                              ▼   ▼      │
-        eaze_ui_sdk_bridge.js  <── STOMP ──>  UiSdkStompGateway + DefaultUiRuntime (pending ids, timeouts)
+        eaze_ui_sdk_bridge.js  <── STOMP ──>  UiSdkStompGateway + DefaultUiRuntime (pending ids, opt-in deadlines)
                                                     │
                                               NativePathProvider ── webui SwingNativePathProvider → PathSelector
 ```
@@ -47,9 +47,10 @@ file, the one at its own build root, and never descends into an included project
 
 Spring Boot hosts need nothing beyond the dependency: `META-INF/spring/…AutoConfiguration.imports` registers
 
-* a `UiRuntime` bean (installed into `EazeUiSdk`, shut down with the context),
+* a `UiRuntime` bean (installed into `EazeUiSdk`; shutting it down with the context also releases every request that is still pending with `BRIDGE_UNAVAILABLE` — never a fake `TIMEOUT`, because nothing expired),
 * `StompUiBrowserTransport` + `UiSdkStompGateway` when `SimpMessagingTemplate` is present,
-* `UiSdkWebSocketConfigurer`, which adds the SockJS endpoint `/ws/eaze-ui-sdk` **without** touching the host's own `WebSocketConfig`.
+* `UiSdkWebSocketConfigurer`, which adds the SockJS endpoint `/ws/eaze-ui-sdk` **without** touching the host's own `WebSocketConfig`,
+* `UiSdkSessionListener` (+ its Spring-free routing table `UiSdkClientSessions`) when spring-websocket is present: the SUBSCRIBE to `/topic/eaze-ui-sdk/client/{clientId}` binds that socket to the window **and** announces its presence to the runtime, so a tab which reconnects is reachable for JVM-initiated traffic without sending anything first; when the socket disconnects the window is released.
 
 Expose real filesystem dialogs by providing one bean (webui does exactly this):
 
@@ -68,7 +69,7 @@ UiPluginScope ui = EazeUiSdk.forPlugin("my-plugin");     // host code: EazeUiSdk
 // 1. Serve actions the browser (or another plugin) calls.
 ui.onAction("myPlugin.reindex", req -> Map.of("indexed", service.reindex(req.getPayload())));
 
-// 2. Drive the editor UI — blocking, human-scale timeouts (default 15 min).
+// 2. Drive the editor UI — blocking calls that wait for the human; no deadline unless you ask for one.
 ui.toastSuccess("Reindexed", "42 files");
 if (ui.confirm("Delete build output?", "This cannot be undone.")) {
     Map<String, Object> answers = ui.showForm("New module", List.of(
@@ -93,7 +94,8 @@ ui.release();                                              // or EazeUiSdk.relea
 
 Blocking helpers (`confirm`, `showForm`, …) throw `UiSdkException` with the same codes the browser uses
 (`CANCELLED`, `TIMEOUT`, `NO_HANDLER`, `INVALID_PAYLOAD`, `HANDLER_ERROR`, `BRIDGE_UNAVAILABLE`).
-Non-blocking callers use `askBrowser(action, payload)` → `CompletableFuture<UiResponse>`.
+Non-blocking callers use `askBrowser(action, payload)` → `CompletableFuture<UiResponse>`. Neither form imposes a
+deadline: pass a positive `timeoutMs` (or `UiRequest.withTimeout(...)`) when a caller truly cannot wait for the human.
 
 ## Wire contract (shared with `eaze_ui_sdk_bridge.js`)
 
@@ -113,10 +115,19 @@ travel as successful frames, so a failed UI action never looks like a transport 
   "handled, no result" — it does *not* fall through to the next handler (side effects run once). The browser bus
   additionally lets listeners intercept built-ins.
 * **Correlation is by request id**, and a remote reply only settles a request that was actually relayed.
-* **Timeouts complete, they never hang**: `sendToBrowser` finishes with a `TIMEOUT` error response; the JS side
-  rejects with `EazeUiError(code:'TIMEOUT')`.
+* **No dialogue timeout by default.** A request carries a deadline only if its caller set one
+  (`UiRequest.withTimeout(...)`, `askBrowser(..., timeoutMs)`, JS `{ timeoutMs }`); until then it stays pending, because a
+  modal must never close behind the user's back. Opted-in requests complete with a `TIMEOUT` error response (JS side:
+  `EazeUiError(code:'TIMEOUT')`) instead of hanging forever.
 * **Native pickers are serialised** on one thread (`PathSelector` shows modal Swing dialogs; stacked modals deadlock).
-* **Window bookkeeping is best-effort**: client ids are refreshed by inbound traffic and pruned after 5 min idle.
+* **Window bookkeeping follows the socket.** A SUBSCRIBE to `/topic/eaze-ui-sdk/client/{clientId}` binds that STOMP
+  session to the window *and* announces its presence to the runtime, so a tab which comes back is reachable for
+  JVM-initiated traffic without sending anything first. When the socket disconnects `UiRuntime.releaseBrowserClient(clientId)`
+  forgets the window and answers every request still addressed to it with `BRIDGE_UNAVAILABLE`. That is what stops a plugin
+  thread from parking forever behind a dialogue whose window closed — dialogues carry no deadline. A reconnect re-binds under
+  the same client id, so the stale socket releases nothing and an open question stays answerable across a network blip.
+  `shutdown()` reports the same way: outstanding requests fail with `BRIDGE_UNAVAILABLE`, because the channel went away and
+  not because anybody was slow.
 
 ## Extending
 
@@ -129,9 +140,9 @@ travel as successful frames, so a failed UI action never looks like a transport 
 ## Tests
 
 ```powershell
-.\gradlew.bat :eaze_editor_ui_sdk:test                                        # 14 JUnit tests: bus semantics, correlation, timeouts, scope lifecycle
-node eaze_editor_ui_sdk/src/test/js/eaze_ui_sdk_core_routing.test.mjs         # 6 checks: relay, id isolation, local priority, NO_HANDLER, inbound, events
-node eaze_editor_ui_sdk/src/test/js/eaze_ui_sdk_bridge.test.mjs               # 5 checks: topics, clientId, inbound reply, event fan-out, disconnect
+.\gradlew.bat :eaze_editor_ui_sdk:test                                        # 29 JUnit tests: bus semantics, correlation, deadlines, window presence (SUBSCRIBE announces, disconnect + shutdown release), scope lifecycle
+node eaze_editor_ui_sdk/src/test/js/eaze_ui_sdk_core_routing.test.mjs         # 11 checks: relay, id isolation, local priority, NO_HANDLER, inbound, events, no implicit deadline
+node eaze_editor_ui_sdk/src/test/js/eaze_ui_sdk_bridge.test.mjs               # 10 checks: topics, clientId, inbound reply, event fan-out, disconnect (legacy + modern STOMP mocks)
 ```
 
 Interactive check without booting the whole editor: serve `src/main/resources/static` and open

@@ -25,6 +25,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
  *       the existing broker, deliberately <em>not</em> a REST API;</li>
  *   <li>an extra SockJS endpoint ({@code /ws/eaze-ui-sdk}) is added without
  *       touching the host's own {@code WebSocketConfig}.</li>
+ *   <li>window presence is tracked on the socket: a disconnect releases every request still waiting on that
+ *       window, so no plugin thread hangs behind a closed editor.</li>
  * </ol>
  */
 @AutoConfiguration
@@ -62,6 +64,24 @@ public class EazeUiSdkAutoConfiguration {
       @ConditionalOnMissingBean
       public UiSdkStompGateway uiSdkStompGateway(UiRuntime runtime, SimpMessagingTemplate messaging) {
          return new UiSdkStompGateway(runtime, messaging);
+      }
+   }
+
+   /**
+    * Window presence over the STOMP socket — bind each editor window to its session and release the requests
+    * still addressed to it when that socket disconnects.  Needs spring-websocket for the session events, hence
+    * a guard of its own: a messaging-only host still gets transport + gateway.
+    */
+   @Configuration(proxyBeanMethods = false)
+   @ConditionalOnClass(name = {
+      "org.springframework.messaging.simp.SimpMessagingTemplate",
+      "org.springframework.web.socket.messaging.SessionDisconnectEvent" })
+   static class StompSessionLifecycleConfiguration {
+
+      @Bean
+      @ConditionalOnMissingBean
+      public UiSdkSessionListener uiSdkSessionListener(UiRuntime runtime) {
+         return new UiSdkSessionListener(runtime);
       }
    }
 

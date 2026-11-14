@@ -220,6 +220,29 @@ await check('unknown-event-without-handler-is-ignored', async () => {
    assert(handled === false, 'an unserveable event must report handled=false, got ' + handled);
    return 'ignored';
 });
+await check('dialogue-requests-carry-no-deadline-by-default', async () => {
+   const sdk = newSdk();
+   const jvm = installFakeJvm(sdk);
+
+   const asked = sdk.request('ui.showForm', { title: 'Take your time' });
+   await tick(120);
+   const raced = await Promise.race([asked, tick(1).then(() => '__still-pending__')]);
+   assert(raced === '__still-pending__', 'a dialogue request timed out on its own');
+
+   jvm.reply(jvm.sent[0], { artifactId: 'demo' });
+   const result = await asked;
+   assert(result.artifactId === 'demo', 'the late reply did not settle the request');
+   return 'no implicit timeout';
+});
+
+await check('explicit-timeout-still-applies-when-a-caller-asks-for-one', async () => {
+   const sdk = newSdk();
+   installFakeJvm(sdk);
+   const error = await sdk.request('ui.showForm', {}, { timeoutMs: 40 }).then(() => null, (e) => e);
+   assert(error && error.code === 'TIMEOUT', 'expected TIMEOUT, got ' + (error && error.code));
+   return error.code;
+});
+
 const failed = results.filter((entry) => !entry.ok);
 for (const entry of results) {
    console.log((entry.ok ? 'PASS ' : 'FAIL ') + entry.name + (entry.detail ? ' — ' + entry.detail : ''));

@@ -35,6 +35,13 @@ dependencies {
 
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    // The STOMP session listener is exercised against the real Spring event/message types (a stub would hide
+    // exactly the API mistakes this area makes), so the same compileOnly jars are needed on the test path.
+    testImplementation 'org.slf4j:slf4j-api:2.0.17'
+    testImplementation 'org.springframework:spring-core:6.2.8'
+    testImplementation 'org.springframework:spring-context:6.2.8'
+    testImplementation 'org.springframework:spring-messaging:6.2.8'
+    testImplementation 'org.springframework:spring-websocket:6.2.8'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
